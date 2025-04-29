@@ -3,3 +3,4 @@ python-telegram-bot
 upbit-client
 pandas
 numpy
+flask
