@@ -1,6 +1,3 @@
 requests
-python-telegram-bot
-upbit-client
-pandas
-numpy
 flask
+upbit-client
