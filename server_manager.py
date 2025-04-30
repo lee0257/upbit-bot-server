@@ -84,4 +84,3 @@ if __name__ == "__main__":
     threading.Thread(target=detect_price_drop, daemon=True).start()
     threading.Thread(target=detect_swing_entry, daemon=True).start()
     app.run(host="0.0.0.0", port=8000)
-
