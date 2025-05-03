@@ -2,122 +2,122 @@ from flask import Flask
 import threading
 import time
 import requests
-import datetime
 
 app = Flask(__name__)
 
+@app.route("/")
+def hello():
+    return "업비트 봇 서버 실행 중!"
+
 chat_ids = [
-    "1901931119",  # 너
-    "7146684315"   # 친구
+    "1901931119",  # 본인 ID
+    "7146684315"   # 친구 ID
 ]
 
-token = "7287889681:AAEuSd9XLyQGnXwDK8fkI40Ut-_COR7xIrY"
-headers = {"accept": "application/json"}
-
-price_history = {}
-alert_history = {}
-
 def send_telegram_alert(message):
+    token = "7287889681:AAEuSd9XLyQGnXwDK8fkI40Ut-_COR7xIrY"
     for chat_id in chat_ids:
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         data = {"chat_id": chat_id, "text": message}
         try:
             requests.post(url, data=data)
         except:
-            print(f"[❌ 텔레그램 실패] {chat_id}")
+            print(f"[텔레그램 전송 실패] 대상: {chat_id}")
 
-def get_market_list():
-    url = "https://api.upbit.com/v1/market/all?isDetails=true"
-    response = requests.get(url, headers=headers)
-    markets = response.json()
-    return [
-        (m["market"], m["korean_name"]) for m in markets
-        if m["market"].startswith("KRW-") and not m["market"].startswith("KRW-BTC")
-    ]
+price_history = {}
+notified_markets = {}
 
-def get_current_price(market):
+def get_current_data(market):
     url = f"https://api.upbit.com/v1/ticker?markets={market}"
     try:
-        response = requests.get(url, headers=headers)
-        return response.json()[0]['trade_price']
+        response = requests.get(url)
+        data = response.json()[0]
+        return data['trade_price'], data['acc_trade_price_24h']
     except:
-        return None
+        return None, None
 
-def is_duplicate_alert(market, alert_type):
-    now = time.time()
-    if market not in alert_history:
-        alert_history[market] = {}
-    if alert_type in alert_history[market]:
-        last_time = alert_history[market][alert_type]
-        if now - last_time < 1800:  # 30분 중복 차단
-            return True
-    alert_history[market][alert_type] = now
-    return False
+def get_market_list():
+    url = "https://api.upbit.com/v1/market/all?isDetails=false"
+    try:
+        response = requests.get(url)
+        return [m for m in response.json() if m['market'].startswith('KRW-') and not m['market'].startswith('KRW-BTC')][:100]  # 상위 100개만 예시
+    except:
+        return []
 
-def monitor_markets():
+def detect_opportunities():
     markets = get_market_list()
     while True:
-        now = time.time()
-        for market, name in markets:
-            current_price = get_current_price(market)
-            if not current_price:
+        for market_info in markets:
+            market = market_info['market']
+            korean_name = market_info['korean_name']
+
+            current_price, volume = get_current_data(market)
+            if not current_price or not volume:
                 continue
 
-            if market not in price_history:
-                price_history[market] = []
-            price_history[market].append((now, current_price))
-            price_history[market] = [p for p in price_history[market] if now - p[0] <= 600]
+            now = time.time()
+            price_history.setdefault(market, []).append((now, current_price))
+            price_history[market] = [(t, p) for t, p in price_history[market] if now - t <= 600]  # 10분 내 기록만 유지
+
+            # 거래대금 필터
+            if volume < 1200_000_000:
+                continue
+
+            # 상승률 계산
+            oldest_time, oldest_price = price_history[market][0]
+            rate = ((current_price - oldest_price) / oldest_price) * 100
+
+            # 중복 알림 방지 (30분)
+            last_alert = notified_markets.get(market, 0)
+            if now - last_alert < 1800:
+                continue
 
             # 급등포착
-            past_5min = [p for p in price_history[market] if now - p[0] <= 300]
-            if len(past_5min) > 1:
-                rate = (current_price - past_5min[0][1]) / past_5min[0][1] * 100
-                if 1.0 <= rate <= 1.2 and not is_duplicate_alert(market, "급등"):
-                    send_telegram_alert(
-                        f"[급등포착 🔥]\n- 코인명: {name}\n- 현재가: {current_price}원\n"
-                        f"- 5분간 상승률: {rate:.2f}%\n- 예상 수익률: 3~5%\n- 예상 소요 시간: 10분\n"
-                        f"- 추천 이유: 체결량 급증 + 매수 강세 포착\nhttps://upbit.com/exchange?code=CRIX.UPBIT.{market}"
-                    )
+            if rate >= 3.0:
+                msg = f"""[급등포착 🔥]
+- 코인명: {korean_name} ({market})
+- 현재가: {current_price}원
+- 매수 추천가: {int(current_price*0.99)} ~ {int(current_price*1.01)}원
+- 목표 매도가: {int(current_price*1.03)}원
+- 예상 수익률: 3%+
+- 예상 소요 시간: 10분 내외
+- 추천 이유: 거래대금 활발 + 매수강세 + 선행포착
+https://upbit.com/exchange?code=CRIX.UPBIT.{market}"""
+                send_telegram_alert(msg)
+                notified_markets[market] = now
 
-            # 급락+바닥다지기
-            past_2min = [p for p in price_history[market] if now - p[0] <= 120]
-            if len(past_2min) > 1:
-                rate = (current_price - past_2min[0][1]) / past_2min[0][1] * 100
-                if rate <= -5.0:
-                    # 바닥다지기: 이후 1분간 ±0.5% 이내 유지
-                    stable = all(
-                        abs((current_price - p[1]) / p[1]) <= 0.005
-                        for p in price_history[market][-6:]
-                    )
-                    if stable and not is_duplicate_alert(market, "급락바닥"):
-                        send_telegram_alert(
-                            f"[급락+바닥다지기 포착 💧]\n- 코인명: {name}\n- 현재가: {current_price}원\n"
-                            f"- 2분간 하락률: {rate:.2f}%\n- 바닥다지기 감지됨\n- 예상 반등 가능성: 높음\n"
-                            f"https://upbit.com/exchange?code=CRIX.UPBIT.{market}"
-                        )
+            # 스윙포착 (0.8~2%)
+            elif 0.8 <= rate <= 2.0:
+                msg = f"""[스윙포착 🌊]
+- 코인명: {korean_name} ({market})
+- 현재가: {current_price}원
+- 매수 추천가: {int(current_price*0.985)} ~ {int(current_price*1.005)}원
+- 목표 매도가: {int(current_price*1.03)}원
+- 예상 수익률: 3%+
+- 예상 소요 시간: 1~3시간
+- 추천 이유: 체결량 급증 + 매수 강세 포착
+https://upbit.com/exchange?code=CRIX.UPBIT.{market}"""
+                send_telegram_alert(msg)
+                notified_markets[market] = now
 
-            # 스윙포착
-            rate10 = (current_price - price_history[market][0][1]) / price_history[market][0][1] * 100
-            if 1.0 <= rate10 <= 1.2 and not is_duplicate_alert(market, "스윙"):
-                send_telegram_alert(
-                    f"[스윙포착 🌊]\n- 코인명: {name}\n- 현재가: {current_price}원\n"
-                    f"- 10분간 상승률: {rate10:.2f}%\n- 예상 수익률: 5~7%\n- 예상 소요 시간: 1~3시간\n"
-                    f"- 추천 이유: 거래량 증가 + 초기 상승 흐름 포착\nhttps://upbit.com/exchange?code=CRIX.UPBIT.{market}"
-                )
+            # 급락포착 (2분 내 5% 하락)
+            recent_data = [(t, p) for t, p in price_history[market] if now - t <= 120]
+            if len(recent_data) >= 2:
+                oldest_t, oldest_p = recent_data[0]
+                drop_rate = ((current_price - oldest_p) / oldest_p) * 100
+                if drop_rate <= -5.0:
+                    msg = f"""[급락포착 💧]
+- 코인명: {korean_name} ({market})
+- 현재가: {current_price}원
+- 하락률: {drop_rate:.2f}%
+- 감지 이유: 단기간 급락 + 매도세 강함
+https://upbit.com/exchange?code=CRIX.UPBIT.{market}"""
+                    send_telegram_alert(msg)
+                    notified_markets[market] = now
 
-        # 매일 오전 8:50 초기화
-        now = datetime.datetime.now()
-        if now.hour == 8 and now.minute == 50:
-            price_history.clear()
-            alert_history.clear()
-
-        time.sleep(10)
-
-@app.route("/")
-def hello():
-    return "🚀 업비트 자동 알림 시스템 실행 중!"
+        time.sleep(8)
 
 if __name__ == "__main__":
-    print("✅ 서버 매니저가 실행되었습니다.")
-    threading.Thread(target=monitor_markets, daemon=True).start()
+    print("서버 매니저 실행 중...")
+    threading.Thread(target=detect_opportunities, daemon=True).start()
     app.run(host="0.0.0.0", port=8000)
