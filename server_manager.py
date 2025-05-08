@@ -55,7 +55,7 @@ def detect_price_surge():
                     rate = ((current_price - oldest_price) / oldest_price) * 100
                     last_time = last_alert_time.get(f"{market}_surge", 0)
                     if rate >= 5 and now - last_time >= 1800:  # 30분 중복 방지
-                        send_telegram_alert(f"[급등포착 🔥]\n코인명: {market}\n현재가: {current_price}원\n5분 상승률: {rate:.2f}%\nhttps://upbit.com/exchange?code=CRIX.UPBIT.{market}")
+                        send_telegram_alert(f"[급등포착 🔥]\n코인명: {market}\n현재가: {current_price}원\n5분 상승률: {rate:.5f}%\nhttps://upbit.com/exchange?code=CRIX.UPBIT.{market}")
                         last_alert_time[f"{market}_surge"] = now
         time.sleep(10)
 
@@ -72,7 +72,7 @@ def detect_price_drop():
                     rate = ((current_price - oldest_price) / oldest_price) * 100
                     last_time = last_alert_time.get(f"{market}_drop", 0)
                     if rate <= -5 and now - last_time >= 1800:  # 30분 중복 방지
-                        send_telegram_alert(f"[급락포착 💧]\n코인명: {market}\n현재가: {current_price}원\n5분 하락률: {rate:.2f}%\nhttps://upbit.com/exchange?code=CRIX.UPBIT.{market}")
+                        send_telegram_alert(f"[급락포착 💧]\n코인명: {market}\n현재가: {current_price}원\n5분 하락률: {rate:.5f}%\nhttps://upbit.com/exchange?code=CRIX.UPBIT.{market}")
                         last_alert_time[f"{market}_drop"] = now
         time.sleep(10)
 
@@ -89,7 +89,7 @@ def detect_swing_entry():
                     rate = ((current_price - oldest_price) / oldest_price) * 100
                     last_time = last_alert_time.get(f"{market}_swing", 0)
                     if 0 < rate <= 2 and now - last_time >= 1800:  # 30분 중복 방지
-                        send_telegram_alert(f"[스윙포착 🌊]\n코인명: {market}\n현재가: {current_price}원\n10분 상승률: {rate:.2f}%\nhttps://upbit.com/exchange?code=CRIX.UPBIT.{market}")
+                        send_telegram_alert(f"[스윙포착 🌊]\n코인명: {market}\n현재가: {current_price}원\n10분 상승률: {rate:.10f}%\nhttps://upbit.com/exchange?code=CRIX.UPBIT.{market}")
                         last_alert_time[f"{market}_swing"] = now
         time.sleep(10)
 
