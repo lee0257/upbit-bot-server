@@ -5,78 +5,53 @@ import requests
 
 app = Flask(__name__)
 
-# ✅ 텔레그램 설정
-TOKEN = "7287889681:AAEuSd9XLyQGnXwDK8fkI40Ut-_COR7xIrY"
-CHAT_IDS = [
-    "1901931119",  # 너
-    "7146684315",  # 친구
-]
+chat_ids = ["1901931119"]  # 테스트용 사용자 ID만 사용
+token = "7287889681:AAEuSd9XLyQGnXwDK8fkI40Ut-_COR7xIrY"
 
-# ✅ 실시간 가격 저장용
-price_history = {}
-MARKETS = ["KRW-NEAR", "KRW-PENGU", "KRW-SUI", "KRW-ARB", "KRW-STX"]  # 테스트용 소수만
-
-# ✅ 텔레그램 전송 함수
-def send_alert(message):
-    for chat_id in CHAT_IDS:
-        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+def send_telegram(message):
+    for chat_id in chat_ids:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
         data = {"chat_id": chat_id, "text": message}
         try:
             requests.post(url, data=data)
-        except Exception as e:
-            print(f"[에러] 텔레그램 전송 실패: {e}")
+        except:
+            print("텔레그램 전송 실패")
 
-# ✅ 업비트 가격 조회 함수
+price_data = {}
+
 def get_price(market):
+    url = f"https://api.upbit.com/v1/ticker?markets={market}"
     try:
-        url = f"https://api.upbit.com/v1/ticker?markets={market}"
-        res = requests.get(url).json()
-        return res[0]["trade_price"]
+        res = requests.get(url)
+        return res.json()[0]["trade_price"]
     except:
         return None
 
-# ✅ 급등 선행 포착 로직 (10분 내 2% 이상 상승 가능성 감지)
 def detect_surge():
+    markets = ["KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SUI", "KRW-NEAR"]
     while True:
         now = time.time()
-        for market in MARKETS:
+        for market in markets:
             price = get_price(market)
-            if not price:
-                continue
+            if price:
+                price_data.setdefault(market, []).append((now, price))
+                price_data[market] = [(t, p) for t, p in price_data[market] if now - t <= 600]
 
-            # 가격 히스토리 초기화 및 유지
-            history = price_history.setdefault(market, [])
-            history.append((now, price))
-            price_history[market] = [(t, p) for t, p in history if now - t <= 600]
+                old_time, old_price = price_data[market][0]
+                rate = (price - old_price) / old_price * 100
 
-            if len(price_history[market]) >= 2:
-                start_time, start_price = price_history[market][0]
-                rate = ((price - start_price) / start_price) * 100
-
-                if rate >= 2.0:
-                    send_alert(
-                        f"[스윙포착 🌊]\n"
-                        f"- 코인명: {market}\n"
-                        f"- 현재가: {int(price)}원\n"
-                        f"- 상승률: {rate:.2f}% (10분)\n"
-                        f"- 조건: 선행포착 테스트\n"
-                        f"- 링크: https://upbit.com/exchange?code=CRIX.UPBIT.{market}"
+                if 1.5 <= rate <= 2.5:  # 선행 포착 범위
+                    send_telegram(
+                        f"[선행급등포착] {market}\n"
+                        f"현재가: {price}원\n"
+                        f"10분 전 대비 상승률: {rate:.2f}%"
                     )
-                    price_history[market] = []
-
-        time.sleep(10)
-
-# ✅ 수동 테스트용 라우트
-@app.route("/test_trigger")
-def test_trigger():
-    send_alert("[테스트] 수동 트리거 정상 작동 ✅")
-    return "수동 알림 발송 완료"
+        time.sleep(15)
 
 @app.route("/")
 def home():
-    return "업비트 봇 서버 정상 작동 중!"
+    return "선행포착 테스트 서버 실행 중"
 
-# ✅ 서버 실행
 if __name__ == "__main__":
     print("서버 매니저 실행 중...")
     threading.Thread(target=detect_surge, daemon=True).start()
